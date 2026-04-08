@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pixel Battle REALTIME MULTIPLAYER</title>
+<style>
+body{margin:0;background:#f2f2f2;color:#111;font-family:Arial;display:flex;flex-direction:column;align-items:center}
+#auth{margin-top:20px;display:flex;flex-direction:column;gap:8px;width:220px}
+input,button{padding:10px;border-radius:8px;border:none}
+button{cursor:pointer}
+#game{display:none;flex-direction:column;align-items:center;width:100%}
+#palette{display:flex;flex-wrap:wrap;gap:8px;margin:10px;justify-content:center}
+.color{width:42px;height:42px;border-radius:10px;border:2px solid #444;transition:0.15s}
+.color.active{border:3px solid white;transform:scale(1.15);box-shadow:0 0 10px white}
+canvas{border:2px solid #ccc;background:white;touch-action:none}
+#info{margin-top:5px;color:#333}
+</style>
+</head>
+<body>
+
+<h2>🔥 Pixel Battle REALTIME</h2>
+
+<div id="auth">
+  <input id="loginInput" placeholder="логин">
+  <input id="passInput" placeholder="пароль" type="password">
+  <button onclick="register()">Регистрация</button>
+  <button onclick="login()">Вход</button>
+</div>
+
+<div id="game">
+  <div id="info"></div>
+  <div id="palette"></div>
+  <canvas id="c"></canvas>
+</div>
+
+<!-- Firebase compat SDK -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+<script>
+const DB_URL = "https://cooldbforpixelbattle-default-rtdb.europe-west1.firebasedatabase.app";
+
+firebase.initializeApp({
+  databaseURL: DB_URL
+});
+
+const db = firebase.database();
+
+let user = null;
+let currentColor = "#ff0000";
+let grid = {};
+let userCache = null;
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const info = document.getElementById("info");
+const palette = document.getElementById("palette");
+
+const SIZE = 128;
+let scale = 12;
+let offsetX = 0;
+let offsetY = 0;
+
+let dragging = false;
+let moved = false;
+let startX=0,startY=0,lastX=0,lastY=0;
+
+const COLORS = [
+"#ff0000","#ff7f00","#ffff00","#00ff00",
+"#00ffff","#0000ff","#8b00ff","#ff00ff",
+"#ffffff","#cccccc","#888888","#444444",
+"#000000","#964B00","#ffb6c1","#00ff7f",
+"transparent"
+];
+
+function buildPalette(){
+palette.innerHTML="";
+COLORS.forEach((c,i)=>{
+const el=document.createElement("div");
+el.className="color"+(i===0?" active":"");
+if(c==="transparent") el.style.background="repeating-conic-gradient(#222 0 25%,#555 0 50%)";
+else el.style.background=c;
+el.onclick=()=>{
+currentColor=c;
+document.querySelectorAll(".color").forEach(e=>e.classList.remove("active"));
+el.classList.add("active");
+};
+palette.appendChild(el);
+});
+}
+buildPalette();
+
+function resize(){
+canvas.width=innerWidth;
+canvas.height=innerHeight-140;
+}
+window.onresize=resize;
+resize();
+
+function clamp(){
+const minX=canvas.width-SIZE*scale;
+const minY=canvas.height-SIZE*scale;
+offsetX=Math.min(0,Math.max(minX,offsetX));
+offsetY=Math.min(0,Math.max(minY,offsetY));
+}
+
+function screenToWorld(x,y){
+const r=canvas.getBoundingClientRect();
+x-=r.left;y-=r.top;
+return{
+ x:Math.floor((x-offsetX)/scale),
+ y:Math.floor((y-offsetY)/scale)
+};
+}
+
+canvas.addEventListener("pointerdown",e=>{
+dragging=true;moved=false;
+startX=e.clientX;startY=e.clientY;
+lastX=e.clientX;lastY=e.clientY;
+});
+
+canvas.addEventListener("pointermove",e=>{
+if(!dragging)return;
+const dx=e.clientX-lastX;
+const dy=e.clientY-lastY;
+if(Math.abs(e.clientX-startX)>4||Math.abs(e.clientY-startY)>4)moved=true;
+offsetX+=dx;offsetY+=dy;
+clamp();
+lastX=e.clientX;lastY=e.clientY;
+});
+
+canvas.addEventListener("pointerup",e=>{
+dragging=false;
+if(!moved){
+const p=screenToWorld(e.clientX,e.clientY);
+if(p.x>=0&&p.y>=0&&p.x<SIZE&&p.y<SIZE) place(p.x,p.y);
+}
+});
+
+canvas.addEventListener("wheel",e=>{
+e.preventDefault();
+const r=canvas.getBoundingClientRect();
+const mx=e.clientX-r.left;
+const my=e.clientY-r.top;
+const wx=(mx-offsetX)/scale;
+const wy=(my-offsetY)/scale;
+const zoom=e.deltaY<0?1.1:0.9;
+scale=Math.max(6,Math.min(40,scale*zoom));
+offsetX=mx-wx*scale;
+offsetY=my-wy*scale;
+clamp();
+},{passive:false});
+
+let lastDist=0;
+canvas.addEventListener("touchmove",e=>{
+if(e.touches.length===2){
+e.preventDefault();
+const r=canvas.getBoundingClientRect();
+const x1=e.touches[0].clientX-r.left;
+const y1=e.touches[0].clientY-r.top;
+const x2=e.touches[1].clientX-r.left;
+const y2=e.touches[1].clientY-r.top;
+const dist=Math.hypot(x1-x2,y1-y2);
+if(lastDist){
+const zoom=dist/lastDist;
+scale=Math.max(6,Math.min(40,scale*zoom));
+clamp();
+}
+lastDist=dist;
+}
+},{passive:false});
+canvas.addEventListener("touchend",()=>lastDist=0);
+
+const anim={};
+
+function draw(){
+ctx.clearRect(0,0,canvas.width,canvas.height);
+
+ctx.strokeStyle="rgba(0,0,0,0.08)";
+for(let i=0;i<=SIZE;i++){
+ctx.beginPath();
+ctx.moveTo(offsetX+i*scale,offsetY);
+ctx.lineTo(offsetX+i*scale,offsetY+SIZE*scale);
+ctx.stroke();
+ctx.beginPath();
+ctx.moveTo(offsetX,offsetY+i*scale);
+ctx.lineTo(offsetX+SIZE*scale,offsetY+i*scale);
+ctx.stroke();
+}
+
+ctx.strokeStyle="#999";
+ctx.strokeRect(offsetX,offsetY,SIZE*scale,SIZE*scale);
+
+for(const k in grid){
+const p=grid[k];
+ctx.fillStyle=p.color;
+ctx.fillRect(offsetX+p.x*scale,offsetY+p.y*scale,scale,scale);
+}
+
+requestAnimationFrame(draw);
+}
+draw();
+
+// REALTIME LISTENER (NO POLLING)
+const pixelsRef = db.ref("pixels");
+
+pixelsRef.on("child_added",snap=>{
+const p=snap.val();
+const k=`${p.x}_${p.y}`;
+grid[k]=p;
+});
+
+pixelsRef.on("child_changed",snap=>{
+const p=snap.val();
+const k=`${p.x}_${p.y}`;
+grid[k]=p;
+});
+
+pixelsRef.on("child_removed",snap=>{
+const p=snap.val();
+const k=`${p.x}_${p.y}`;
+delete grid[k];
+});
+
+async function getUser(){
+if(userCache) return userCache;
+const d=await db.ref("users/"+user).get();
+userCache=d.val();
+return userCache;
+}
+
+async function updateUser(d){
+userCache={...userCache,...d};
+await db.ref("users/"+user).update(d);
+}
+
+async function place(x,y){
+const u=await getUser();
+if(!u||u.pixels<=0)return;
+const key=`${x}_${y}`;
+if(currentColor==="transparent"){
+await db.ref("pixels/"+key).remove();
+u.pixels--;
+updateUser({pixels:u.pixels});
+return;
+}
+await db.ref("pixels/"+key).set({x,y,color:currentColor,user,t:Date.now()});
+u.pixels--;
+updateUser({pixels:u.pixels});
+}
+
+async function hash(str){
+const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(str));
+return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+async function register(){
+const l=loginInput.value.trim();
+const p=passInput.value;
+if(!l||!p)return alert("поля");
+const exists=await db.ref("users/"+l).get();
+if(exists.exists())return alert("занят");
+const hp=await hash(p);
+await db.ref("users/"+l).set({pass:hp,pixels:30,last:Date.now()});
+alert("готово");
+}
+
+async function login(){
+const l=loginInput.value.trim();
+const p=passInput.value;
+const d=(await db.ref("users/"+l).get()).val();
+if(!d)return alert("нет юзера");
+if(await hash(p)!==d.pass)return alert("пароль");
+user=l;
+localStorage.setItem("pb_user",l);
+start();
+}
+
+async function start(){
+auth.style.display="none";
+game.style.display="flex";
+regen();
+}
+
+function regen(){
+setInterval(async()=>{
+const u=(await getUser())||{pixels:0,last:Date.now()};
+const now=Date.now();
+const add=Math.floor((now-u.last)/30000);
+if(add>0){
+u.pixels=Math.min(30,u.pixels+add);
+u.last=now;
+await updateUser(u);
+}
+info.innerText=`👤 ${user} | ⚡ ${u.pixels}/30`;
+},1000);
+}
+
+window.onload=async()=>{
+const u=localStorage.getItem("pb_user");
+if(u){
+const d=(await db.ref("users/"+u).get()).val();
+if(d){user=u;start();}
+}
+};
+</script>
+</body>
+</html>

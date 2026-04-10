@@ -118,8 +118,9 @@ const DB_URL = "https://cooldbforpixelbattle-default-rtdb.europe-west1.firebased
 firebase.initializeApp({ databaseURL: DB_URL });
 const db = firebase.database();
 
-// ⚙️ СЮДА ВПИШИ СВОЙ НИК
-const ADMIN_USER = "Алишер";
+// Константа Алишер остается как "главный" по умолчанию, 
+// но теперь isAdmin будет проверяться через базу.
+const STATIC_ADMIN = "Алишер";
 
 let user = null;
 let isAdmin = false;
@@ -128,7 +129,7 @@ let grid = {};
 let userCache = null;
 let highlightedPixel = null;
 let rainbowHue = 0;
-let activeEvent = null; // текущий активный ивент
+let activeEvent = null;
 
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
@@ -162,7 +163,6 @@ const COLORS = ["#ff0000","#ff7f00","#ffff00","#00ff00",
 
 let toolMode = "paint";
 
-// ===== ИВЕНТЫ =====
 const EVENT_DEFS = {
   gold:       {emoji:"🏅", name:"Золотой пиксель",     duration: 0},
   fastcharge: {emoji:"⚡", name:"Быстрая зарядка",      duration: 5*60*1000},
@@ -175,7 +175,6 @@ function getEventLabel(type){
   return d ? `${d.emoji} ${d.name}` : type;
 }
 
-// Слушаем активный ивент из Firebase
 db.ref("activeEvent").on("value", s => {
   const ev = s.val();
   activeEvent = ev;
@@ -185,9 +184,6 @@ db.ref("activeEvent").on("value", s => {
     return;
   }
   showEventBanner(ev);
-  if(ev.type === "gold" && ev.goldPos){
-    // подсветим золотой пиксель в grid
-  }
 });
 
 function showEventBanner(ev){
@@ -198,7 +194,6 @@ function showEventBanner(ev){
   eventBanner.innerText = `${def.emoji||"🎉"} ИВЕНТ: ${def.name||ev.type}${timeStr}`;
 }
 
-// Обновляем таймер баннера каждую секунду
 setInterval(()=>{
   if(!activeEvent) return;
   if(Date.now() > activeEvent.endsAt){
@@ -210,7 +205,6 @@ setInterval(()=>{
   showEventBanner(activeEvent);
 }, 1000);
 
-// Планировщик — проверяем каждые 10 сек
 setInterval(async()=>{
   if(!isAdmin) return;
   const snap = await db.ref("scheduledEvents").get();
@@ -237,7 +231,6 @@ async function launchEvent(type){
     await db.ref("activeEvent").set({type, endsAt: now+10*60*1000, goldPos:{x:gx,y:gy}});
     db.ref("announcement").set({text:`🏅 Золотой пиксель появился на (${gx}, ${gy})! Перекрась его и получи +30 энергии!`, t:now});
   } else if(type === "rain"){
-    // выдаём всем онлайн +20 энергии
     const snap = await db.ref("online").get();
     const online = snap.val();
     if(online){
@@ -298,8 +291,6 @@ async function deleteScheduled(id){
 
 function openEventUI(){eventUI.style.display="block";refreshScheduledList();}
 function closeEventUI(){eventUI.style.display="none";}
-
-// ===== КОНЕЦ ИВЕНТОВ =====
 
 function getRequired(level){return 10 * level;}
 
@@ -521,17 +512,12 @@ async function checkLevel(){const u=await getUser();let lvl=u.level||1;let place
 async function place(x,y){
   const u=await getUser();
   if(!u)return;
-
   const freeEvent = activeEvent && activeEvent.type==="free" && Date.now()<activeEvent.endsAt;
   if(!freeEvent && u.pixels<=0) return;
-
   const key=`${x}_${y}`;const existing=grid[key];
   if(existing&&existing.lockedLevel===2&&!isAdmin)return;
   if(existing&&existing.user!==user&&existing.lockedLevel===1){if(u.pixels<3)return;if(!freeEvent)u.pixels-=3;}
-
-  // Золотой ивент — перекрасил золотой пиксель = +30 энергии
   const wasGolden = existing&&existing.golden&&activeEvent&&activeEvent.type==="gold";
-
   if(currentColor==="transparent"){
     if(existing&&existing.lockedLevel===2&&!isAdmin)return;
     await db.ref("pixels/"+key).remove();
@@ -539,18 +525,15 @@ async function place(x,y){
     db.ref("lastAction").set({user,x,y,t:Date.now(),removed:true});
     return;
   }
-
   await db.ref("pixels/"+key).set({x,y,color:currentColor,user,t:Date.now()});
   if(!freeEvent) u.pixels--;
   u.totalPlacedPixels=(u.totalPlacedPixels||0)+1;
   u.TotalPlaced=(u.TotalPlaced||0)+1;
-
   if(wasGolden){
     u.pixels=Math.min(u.maxPixels||30,(u.pixels||0)+30);
     db.ref("announcement").set({text:`🏅 ${user} перекрасил золотой пиксель и получил +30 энергии!`,t:Date.now()});
     db.ref("activeEvent").remove();
   }
-
   await updateUser({pixels:u.pixels,totalPlacedPixels:u.totalPlacedPixels,TotalPlaced:u.TotalPlaced});
   await checkLevel();
   db.ref("lastAction").set({user,x,y,t:Date.now(),removed:false});
@@ -566,13 +549,24 @@ async function register(){const l=loginInput.value.trim();const p=passInput.valu
 
 function forceBan(){user=null;localStorage.removeItem("pb_user");localStorage.setItem("pb_banned","true");userCache=null;game.style.display="none";auth.style.display="flex";alert("🚫 Ты забанен.");}
 
+// НОВАЯ ФУНКЦИЯ ПРОВЕРКИ АДМИНА
+async function checkIsAdmin(username) {
+  if (username === STATIC_ADMIN) return true;
+  const snap = await db.ref("Administrators/" + username).get();
+  return snap.val() === true;
+}
+
 async function login(){
   const l=loginInput.value.trim();const p=passInput.value;
   if(l==="__unban__"&&await hash(p)===await hash("admin228")){localStorage.removeItem("pb_banned");return alert("✅ Бан снят!");}
   if(localStorage.getItem("pb_banned")==="true")return alert("🚫 Ты забанен.");
   const snap=await db.ref("users/"+l).get();const d=snap.val();if(!d)return alert("нет юзера");if(await hash(p)!==d.pass)return alert("пароль");
   if(d.banned){localStorage.setItem("pb_banned","true");return alert("🚫 Ты забанен.");}
-  user=l;isAdmin=(user===ADMIN_USER);localStorage.setItem("pb_user",l);
+  
+  user=l;
+  isAdmin = await checkIsAdmin(l); // Проверяем админку в БД
+  
+  localStorage.setItem("pb_user",l);
   let lvl=d.level||1;let placed=d.totalPlacedPixels||0;let maxPixels=d.maxPixels||30;
   while(placed>=getRequired(lvl)){placed-=getRequired(lvl);lvl++;maxPixels+=5;}
   await db.ref("users/"+l).update({level:lvl,totalPlacedPixels:placed,maxPixels,nextLevelProgress:placed});
@@ -597,7 +591,15 @@ function regen(){setInterval(async()=>{
 window.onload=async()=>{
   if(localStorage.getItem("pb_banned")==="true")return alert("🚫 Ты забанен.");
   const u=localStorage.getItem("pb_user");
-  if(u){const d=(await db.ref("users/"+u).get()).val();if(d){if(d.banned){localStorage.setItem("pb_banned","true");return alert("🚫 Ты забанен.");}user=u;isAdmin=(user===ADMIN_USER);start();}}
+  if(u){
+    const d=(await db.ref("users/"+u).get()).val();
+    if(d){
+      if(d.banned){localStorage.setItem("pb_banned","true");return alert("🚫 Ты забанен.");}
+      user=u;
+      isAdmin = await checkIsAdmin(u); // Проверяем админку в БД при автологине
+      start();
+    }
+  }
 };
 </script>
 </body>

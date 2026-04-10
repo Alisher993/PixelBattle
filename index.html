@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Pixel Battle REALTIME MULTIPLAYER</title>
 <style>
-body{margin:0;background:#e9e9e9;color:#111;font-family:Arial;display:flex;flex-direction:column;align-items:center;overflow-x:hidden}
+body{margin:0;background:#e9e9e9;color:#111;font-family:Arial;display:flex;flex-direction:column;align-items:center}
 #auth{margin-top:20px;display:flex;flex-direction:column;gap:8px;width:220px}
 input,button{padding:10px;border-radius:8px;border:none}
 button{cursor:pointer}
@@ -32,25 +32,9 @@ canvas{border:2px solid #999;background:white;touch-action:none}
 #scheduledList{margin-top:10px;font-size:13px}
 .ev-item{background:#222;border-radius:8px;padding:8px 10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
 .ev-del{background:#600;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:12px}
-
-/* Эффекты для ядерки */
-#nukeOverlay {
-  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-  pointer-events: none; z-index: 100000; display: none;
-  animation: nukeFlash 0.5s infinite alternate;
-  background: rgba(255, 0, 0, 0.2);
-  justify-content: center; align-items: center; text-align: center;
-}
-#nukeOverlay div {
-  background: rgba(0, 0, 0, 0.8); color: #fff; padding: 20px;
-  border: 4px solid red; font-size: 24px; font-weight: bold;
-}
-@keyframes nukeFlash { from { background: rgba(255, 0, 0, 0.4); } to { background: rgba(255, 165, 0, 0.1); } }
 </style>
 </head>
 <body>
-
-<div id="nukeOverlay"><div>☢️ ЯДЕРНАЯ БОМБА ЛЕТИТ НА КООРДИНАТЫ<br><span id="nukeCoords"></span></div></div>
 
 <h2>🔥 Pixel Battle REALTIME</h2>
 
@@ -134,7 +118,10 @@ const DB_URL = "https://cooldbforpixelbattle-default-rtdb.europe-west1.firebased
 firebase.initializeApp({ databaseURL: DB_URL });
 const db = firebase.database();
 
+// Константа Алишер остается как "главный" по умолчанию, 
+// но теперь isAdmin будет проверяться через базу.
 const STATIC_ADMIN = "Алишер";
+
 let user = null;
 let isAdmin = false;
 let currentColor = "#ff0000";
@@ -188,22 +175,6 @@ function getEventLabel(type){
   return d ? `${d.emoji} ${d.name}` : type;
 }
 
-// === СИСТЕМА ЯДЕРКИ (ОБРАБОТЧИК) ===
-db.ref("nuke").on("value", s => {
-  const d = s.val();
-  if(!d) {
-    document.getElementById("nukeOverlay").style.display = "none";
-    return;
-  }
-  const now = Date.now();
-  if(now < d.boomAt) {
-    document.getElementById("nukeOverlay").style.display = "flex";
-    document.getElementById("nukeCoords").innerText = `(${d.x}, ${d.y})`;
-  } else {
-    document.getElementById("nukeOverlay").style.display = "none";
-  }
-});
-
 db.ref("activeEvent").on("value", s => {
   const ev = s.val();
   activeEvent = ev;
@@ -234,6 +205,114 @@ setInterval(()=>{
   showEventBanner(activeEvent);
 }, 1000);
 
+setInterval(async()=>{
+  if(!isAdmin) return;
+  const snap = await db.ref("scheduledEvents").get();
+  const all = snap.val();
+  if(!all) return;
+  const now = Date.now();
+  for(const [id, ev] of Object.entries(all)){
+    if(ev.startsAt <= now){
+      await launchEvent(ev.type);
+      await db.ref("scheduledEvents/"+id).remove();
+      refreshScheduledList();
+    }
+  }
+}, 10000);
+
+async function launchEvent(type){
+  const now = Date.now();
+  const def = EVENT_DEFS[type]||{};
+
+  if(type === "gold"){
+    const gx = Math.floor(Math.random()*SIZE);
+    const gy = Math.floor(Math.random()*SIZE);
+    await db.ref("pixels/"+gx+"_"+gy).set({x:gx,y:gy,color:"#FFD700",golden:true,user:"__event__",t:now});
+    await db.ref("activeEvent").set({type, endsAt: now+10*60*1000, goldPos:{x:gx,y:gy}});
+    db.ref("announcement").set({text:`🏅 Золотой пиксель появился на (${gx}, ${gy})! Перекрась его и получи +30 энергии!`, t:now});
+  } else if(type === "rain"){
+    const snap = await db.ref("online").get();
+    const online = snap.val();
+    if(online){
+      for(const uid of Object.keys(online)){
+        const usnap = await db.ref("users/"+uid).get();
+        const ud = usnap.val();
+        if(ud && !ud.banned){
+          const newPx = Math.min((ud.maxPixels||30), (ud.pixels||0)+20);
+          await db.ref("users/"+uid).update({pixels:newPx});
+        }
+      }
+    }
+    await db.ref("activeEvent").set({type, endsAt: now+1000});
+    db.ref("announcement").set({text:`🎁 Дождь энергии! Все игроки онлайн получили +20 энергии!`, t:now});
+  } else {
+    await db.ref("activeEvent").set({type, endsAt: now+def.duration});
+    db.ref("announcement").set({text:`${def.emoji} Ивент начался: ${def.name}!`, t:now});
+  }
+}
+
+function launchEventNow(){
+  if(!isAdmin) return;
+  const type = document.getElementById("eventType").value;
+  launchEvent(type);
+}
+
+async function scheduleEvent(){
+  if(!isAdmin) return;
+  const type = document.getElementById("eventType").value;
+  const timeVal = document.getElementById("eventTime").value;
+  if(!timeVal) return alert("Выбери время!");
+  const startsAt = new Date(timeVal).getTime();
+  if(startsAt <= Date.now()) return alert("Выбери время в будущем!");
+  const id = "ev_"+Date.now();
+  await db.ref("scheduledEvents/"+id).set({type, startsAt});
+  refreshScheduledList();
+  alert(`✅ Запланировано: ${getEventLabel(type)} в ${new Date(startsAt).toLocaleTimeString()}`);
+}
+
+async function refreshScheduledList(){
+  if(!isAdmin) return;
+  const snap = await db.ref("scheduledEvents").get();
+  const all = snap.val();
+  const el = document.getElementById("scheduledList");
+  if(!all){el.innerHTML="<div style='color:#666'>Пусто</div>";return;}
+  el.innerHTML = Object.entries(all).map(([id,ev])=>`
+    <div class="ev-item">
+      <span>${getEventLabel(ev.type)} — ${new Date(ev.startsAt).toLocaleString()}</span>
+      <button class="ev-del" onclick="deleteScheduled('${id}')">✖</button>
+    </div>
+  `).join("");
+}
+
+async function deleteScheduled(id){
+  await db.ref("scheduledEvents/"+id).remove();
+  refreshScheduledList();
+}
+
+function openEventUI(){eventUI.style.display="block";refreshScheduledList();}
+function closeEventUI(){eventUI.style.display="none";}
+
+function getRequired(level){return 10 * level;}
+
+function getCooldown(level){
+  const base = Math.max(5000, 30000 - Math.floor((level-1)/3)*1000);
+  if(activeEvent && activeEvent.type==="fastcharge" && Date.now()<activeEvent.endsAt) return 10000;
+  return base;
+}
+
+function hslToHex(h,s,l){
+  s/=100;l/=100;
+  const a=s*Math.min(l,1-l);
+  const f=n=>{const k=(n+h/30)%12;const c=l-a*Math.max(Math.min(k-3,9-k,1),-1);return Math.round(255*c).toString(16).padStart(2,'0');};
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+function logoutWithPassword(){
+  const pw=prompt("Введите пароль для выхода:");
+  if(pw==="зюзьляндия"){localStorage.removeItem("pb_user");alert("Автоматический вход отключен. Перезагрузите страницу.");location.reload();}
+  else alert("Неверный пароль!");
+}
+
 function buildPalette(){
 palette.innerHTML="";
 COLORS.forEach((c,i)=>{
@@ -260,11 +339,6 @@ logoutBtn.onclick=logoutWithPassword;
 palette.appendChild(logoutBtn);
 
 if(isAdmin){
-  const nukeBtn=document.createElement("div");
-  nukeBtn.className="color";nukeBtn.innerText="☢️";nukeBtn.style.background="#ffcc00";nukeBtn.style.color="#000";nukeBtn.title="Ядерная бомба";
-  nukeBtn.onclick=()=>{toolMode="nuke";document.querySelectorAll(".color").forEach(e=>e.classList.remove("active"));nukeBtn.classList.add("active");};
-  palette.appendChild(nukeBtn);
-
   const bombBtn=document.createElement("div");
   bombBtn.className="color";bombBtn.innerText="💣";bombBtn.style.background="#ff4400";bombBtn.style.color="#fff";bombBtn.title="Бомба 5x5";
   bombBtn.onclick=()=>{toolMode="bomb";document.querySelectorAll(".color").forEach(e=>e.classList.remove("active"));bombBtn.classList.add("active");};
@@ -313,7 +387,6 @@ canvas.addEventListener("pointerup",e=>{
       if(toolMode==="inspect") inspectPixel(p.x,p.y);
       else if(toolMode==="lock") lockPixel(p.x,p.y);
       else if(toolMode==="bomb") adminBomb(p.x,p.y);
-      else if(toolMode==="nuke") launchNuke(p.x,p.y);
       else if(toolMode==="adminlock") adminLockPixel(p.x,p.y);
       else if(toolMode==="rainbow") placeRainbow(p.x,p.y);
       else if(toolMode==="zone") adminZone(p.x,p.y);
@@ -321,6 +394,11 @@ canvas.addEventListener("pointerup",e=>{
     }
   }
 });
+
+let lastDist=0;
+canvas.addEventListener("touchstart",e=>{if(e.touches.length===2)lastDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);});
+canvas.addEventListener("touchmove",e=>{if(e.touches.length===2){e.preventDefault();const r=canvas.getBoundingClientRect();const dist=Math.hypot(e.touches[0].clientX-r.left-(e.touches[1].clientX-r.left),e.touches[0].clientY-r.top-(e.touches[1].clientY-r.top));if(lastDist){const zoom=dist/lastDist;scale=Math.max(5,Math.min(50,scale*zoom));clamp();}lastDist=dist;}},{passive:false});
+canvas.addEventListener("touchend",()=>lastDist=0);
 
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -356,62 +434,122 @@ pixelsRef.on("child_added",s=>grid[`${s.val().x}_${s.val().y}`]=s.val());
 pixelsRef.on("child_changed",s=>grid[`${s.val().x}_${s.val().y}`]=s.val());
 pixelsRef.on("child_removed",s=>delete grid[`${s.val().x}_${s.val().y}`]);
 
-// === ЛОГИКА ЯДЕРКИ ===
-async function launchNuke(cx, cy) {
-  if(!isAdmin) return;
-  const radiusInput = prompt("Введите радиус взрыва (например, 7 для 7x7):", "7");
-  const r = Math.floor(parseInt(radiusInput)/2);
-  if(isNaN(r) || r < 1) return;
+db.ref("lastAction").on("value",s=>{
+  const d=s.val();if(!d)return;if(Date.now()-d.t>60000)return;
+  const verb=d.removed?"стёр пиксель":"поставил пиксель";
+  lastPixelEl.innerText=`🖊 ${d.user} ${verb} (${d.x}, ${d.y})`;
+});
 
-  const boomAt = Date.now() + 10000;
-  await db.ref("nuke").set({x: cx, y: cy, boomAt});
+db.ref("announcement").on("value",s=>{
+  const d=s.val();if(!d)return;if(Date.now()-d.t>30000)return;
+  document.getElementById("announcementText").innerText="📢 "+d.text;
+  document.getElementById("announcementBanner").style.display="block";
+});
 
-  // Фаза "накала" через базу
-  setTimeout(async () => {
-    let updates = {};
-    for(let dx=-r; dx<=r; dx++) for(let dy=-r; dy<=r; dy++) {
-      const x=cx+dx, y=cy+dy;
-      if(x<0||y<0||x>=SIZE||y>=SIZE) continue;
-      updates[`${x}_${y}`] = {x,y,color:"#ff0000",user:"☢️",t:Date.now()};
-    }
-    await db.ref("pixels").update(updates);
-  }, 2000);
-
-  setTimeout(async () => {
-    let updates = {};
-    for(let dx=-r; dx<=r; dx++) for(let dy=-r; dy<=r; dy++) {
-      const x=cx+dx, y=cy+dy;
-      if(x<0||y<0||x>=SIZE||y>=SIZE) continue;
-      updates[`${x}_${y}`] = {x,y,color:"#ff6a00",user:"☢️",t:Date.now()};
-    }
-    await db.ref("pixels").update(updates);
-  }, 5000);
-
-  setTimeout(async () => {
-    let updates = {};
-    for(let dx=-r; dx<=r; dx++) for(let dy=-r; dy<=r; dy++) {
-      const x=cx+dx, y=cy+dy;
-      if(x<0||y<0||x>=SIZE||y>=SIZE) continue;
-      updates[`${x}_${y}`] = {x,y,color:"#ffff00",user:"☢️",t:Date.now()};
-    }
-    await db.ref("pixels").update(updates);
-  }, 8000);
-
-  // ФИНАЛЬНЫЙ ВЗРЫВ
-  setTimeout(async () => {
-    let updates = {};
-    for(let dx=-r; dx<=r; dx++) for(let dy=-r; dy<=r; dy++) {
-      const x=cx+dx, y=cy+dy;
-      if(x<0||y<0||x>=SIZE||y>=SIZE) continue;
-      updates[`${x}_${y}`] = null;
-    }
-    await db.ref("pixels").update(updates);
-    await db.ref("nuke").remove();
-    db.ref("lastAction").set({user:"☢️ ЯДЕРНЫЙ ВЗРЫВ",x:cx,y:cy,t:Date.now(),removed:true});
-  }, 10000);
+function startOnline(){
+  const ref=db.ref("online/"+user);
+  ref.set(true);ref.onDisconnect().remove();
+  db.ref("online").on("value",s=>{onlineCount.innerText=`🟢 Онлайн: ${s.numChildren()}`;});
 }
 
-// Остальные функции (login, checkIsAdmin и т.д.) без изменений
+async function openTop(){
+  topUI.style.display="block";topList.innerText="Загрузка...";
+  const snap=await db.ref("users").get();const users=snap.val();
+  if(!users){topList.innerText="Пусто";return;}
+  const arr=Object.entries(users).filter(([,u])=>!u.banned).map(([name,u])=>({name,total:u.TotalPlaced||0})).sort((a,b)=>b.total-a.total).slice(0,10);
+  const medals=["🥇","🥈","🥉"];
+  topList.innerHTML=arr.map((u,i)=>`<div style="display:flex;justify-content:space-between;border-bottom:1px solid #333;padding:4px 0"><span>${medals[i]||`${i+1}.`} <b>${u.name}</b></span><span style="color:#4caf50">${u.total} px</span></div>`).join("");
+}
+function closeTop(){topUI.style.display="none";}
+
+async function getUser(){if(userCache)return userCache;const d=await db.ref("users/"+user).get();userCache=d.val();return userCache;}
+async function updateUser(d){userCache={...userCache,...d};await db.ref("users/"+user).update(d);}
+
+function inspectPixel(x,y){
+  const p=grid[`${x}_${y}`];highlightedPixel={x,y};panel.style.display="block";
+  const lockStr=p?.lockedLevel===2?"👑 Админский (нельзя сломать)":p?.lockedLevel===1?"да":"нет";
+  panelContent.innerHTML=!p
+    ?`📍 <b>(${x}, ${y})</b><br>Пусто<br>🔒 Запривачен: нет`
+    :`📍 <b>(${p.x}, ${p.y})</b><br>🎨 ${p.rainbow?"🌈 Радужный":p.golden?"⭐ Золотой":p.color}<br>👤 ${p.user||"unknown"}<br>🔒 Запривачен: ${lockStr}<br>⏱ ${p.t?new Date(p.t).toLocaleString():"—"}`;
+}
+
+async function lockPixel(x,y){
+  const u=await getUser();const key=`${x}_${y}`;const p=grid[key];
+  if(!p||p.user!==user)return;if(p.lockedLevel===2)return;if(u.pixels<3)return;
+  await db.ref("pixels/"+key).update({lockedLevel:1});u.pixels-=3;await updateUser({pixels:u.pixels});
+}
+
+async function adminBomb(cx,cy){
+  if(!isAdmin)return;const r=2;const updates={};
+  for(let dx=-r;dx<=r;dx++)for(let dy=-r;dy<=r;dy++){const x=cx+dx,y=cy+dy;if(x<0||y<0||x>=SIZE||y>=SIZE)continue;updates[`${x}_${y}`]=null;}
+  await db.ref("pixels").update(updates);db.ref("lastAction").set({user,x:cx,y:cy,t:Date.now(),removed:true});
+}
+
+async function adminLockPixel(x,y){
+  if(!isAdmin)return;const key=`${x}_${y}`;const p=grid[key];if(!p)return;
+  await db.ref("pixels/"+key).update({lockedLevel:2});
+}
+
+async function placeRainbow(x,y){
+  if(!isAdmin)return;const key=`${x}_${y}`;
+  await db.ref("pixels/"+key).set({x,y,color:"#ff0000",rainbow:true,user,t:Date.now()});
+  db.ref("lastAction").set({user,x,y,t:Date.now(),removed:false});
+}
+
+async function adminZone(cx,cy){
+  if(!isAdmin)return;const r=1;const updates={};
+  for(let dx=-r;dx<=r;dx++)for(let dy=-r;dy<=r;dy++){const x=cx+dx,y=cy+dy;if(x<0||y<0||x>=SIZE||y>=SIZE)continue;updates["pixels/"+`${x}_${y}`]={x,y,color:currentColor,user,t:Date.now(),lockedLevel:2};}
+  await db.ref().update(updates);db.ref("lastAction").set({user,x:cx,y:cy,t:Date.now(),removed:false});
+}
+
+function sendAnnouncement(){
+  if(!isAdmin)return;const msg=prompt("Текст объявления:");if(!msg||!msg.trim())return;
+  db.ref("announcement").set({text:msg.trim(),t:Date.now()});
+}
+
+async function checkLevel(){const u=await getUser();let lvl=u.level||1;let placed=u.totalPlacedPixels||0;let maxPixels=u.maxPixels||30;let changed=false;while(placed>=getRequired(lvl)){placed-=getRequired(lvl);lvl++;maxPixels+=5;changed=true;}if(changed)await updateUser({level:lvl,totalPlacedPixels:placed,maxPixels});}
+
+async function place(x,y){
+  const u=await getUser();
+  if(!u)return;
+  const freeEvent = activeEvent && activeEvent.type==="free" && Date.now()<activeEvent.endsAt;
+  if(!freeEvent && u.pixels<=0) return;
+  const key=`${x}_${y}`;const existing=grid[key];
+  if(existing&&existing.lockedLevel===2&&!isAdmin)return;
+  if(existing&&existing.user!==user&&existing.lockedLevel===1){if(u.pixels<3)return;if(!freeEvent)u.pixels-=3;}
+  const wasGolden = existing&&existing.golden&&activeEvent&&activeEvent.type==="gold";
+  if(currentColor==="transparent"){
+    if(existing&&existing.lockedLevel===2&&!isAdmin)return;
+    await db.ref("pixels/"+key).remove();
+    if(!freeEvent){u.pixels--;updateUser({pixels:u.pixels});}
+    db.ref("lastAction").set({user,x,y,t:Date.now(),removed:true});
+    return;
+  }
+  await db.ref("pixels/"+key).set({x,y,color:currentColor,user,t:Date.now()});
+  if(!freeEvent) u.pixels--;
+  u.totalPlacedPixels=(u.totalPlacedPixels||0)+1;
+  u.TotalPlaced=(u.TotalPlaced||0)+1;
+  if(wasGolden){
+    u.pixels=Math.min(u.maxPixels||30,(u.pixels||0)+30);
+    db.ref("announcement").set({text:`🏅 ${user} перекрасил золотой пиксель и получил +30 энергии!`,t:Date.now()});
+    db.ref("activeEvent").remove();
+  }
+  await updateUser({pixels:u.pixels,totalPlacedPixels:u.totalPlacedPixels,TotalPlaced:u.TotalPlaced});
+  await checkLevel();
+  db.ref("lastAction").set({user,x,y,t:Date.now(),removed:false});
+}
+
+function openUpgradeUI(){upgradeUI.style.display="block";refreshUpgrade();}
+function closeUpgradeUI(){upgradeUI.style.display="none";}
+async function refreshUpgrade(){const u=await getUser();const lvl=u.level||1;const req=getRequired(lvl);const percent=Math.min(100,(u.totalPlacedPixels||0)/req*100);document.getElementById("uName").innerText=user;document.getElementById("uLevel").innerText=`Level ${lvl} | ${u.totalPlacedPixels||0}/${req}`;document.getElementById("bar").style.width=percent+"%";const cd=getCooldown(lvl);document.getElementById("uStats").innerHTML=`🧱 Max Pixels: ${u.maxPixels||30}<br>⏱ Cooldown: ${Math.round(cd/1000)}s`;}
+
+async function hash(str){const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(str));return[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');}
+
+async function register(){const l=loginInput.value.trim();const p=passInput.value;if(!l||!p)return alert("поля");const snap=await db.ref("users/"+l).get();if(snap.exists())return alert("занят");await db.ref("users/"+l).set({pass:await hash(p),pixels:30,last:Date.now(),totalPlacedPixels:0,level:1,maxPixels:30,TotalPlaced:0});alert("готово");}
+
+function forceBan(){user=null;localStorage.removeItem("pb_user");localStorage.setItem("pb_banned","true");userCache=null;game.style.display="none";auth.style.display="flex";alert("🚫 Ты забанен.");}
+
+// НОВАЯ ФУНКЦИЯ ПРОВЕРКИ АДМИНА
 async function checkIsAdmin(username) {
   if (username === STATIC_ADMIN) return true;
   const snap = await db.ref("Administrators/" + username).get();
@@ -424,33 +562,45 @@ async function login(){
   if(localStorage.getItem("pb_banned")==="true")return alert("🚫 Ты забанен.");
   const snap=await db.ref("users/"+l).get();const d=snap.val();if(!d)return alert("нет юзера");if(await hash(p)!==d.pass)return alert("пароль");
   if(d.banned){localStorage.setItem("pb_banned","true");return alert("🚫 Ты забанен.");}
-  user=l; isAdmin = await checkIsAdmin(l);
+  
+  user=l;
+  isAdmin = await checkIsAdmin(l); // Проверяем админку в БД
+  
   localStorage.setItem("pb_user",l);
+  let lvl=d.level||1;let placed=d.totalPlacedPixels||0;let maxPixels=d.maxPixels||30;
+  while(placed>=getRequired(lvl)){placed-=getRequired(lvl);lvl++;maxPixels+=5;}
+  await db.ref("users/"+l).update({level:lvl,totalPlacedPixels:placed,maxPixels,nextLevelProgress:placed});
   start();
 }
 
-function start(){
+async function start(){
   auth.style.display="none";game.style.display="flex";
   buildPalette();startOnline();regen();
 }
 
-// ... (остальные вспомогательные функции из предыдущего кода) ...
-// Здесь должны быть: register, logoutWithPassword, hash, updateUser, getUser, regen, startOnline, adminBomb и т.д.
-// Чтобы код не был бесконечным, я предполагаю их наличие из предыдущего шага.
-
-async function hash(str){const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(str));return[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');}
-async function register(){const l=loginInput.value.trim();const p=passInput.value;if(!l||!p)return alert("поля");const snap=await db.ref("users/"+l).get();if(snap.exists())return alert("занят");await db.ref("users/"+l).set({pass:await hash(p),pixels:30,last:Date.now(),totalPlacedPixels:0,level:1,maxPixels:30,TotalPlaced:0});alert("готово");}
-function logoutWithPassword(){const pw=prompt("Введите пароль для выхода:");if(pw==="зюзьляндия"){localStorage.removeItem("pb_user");location.reload();}else alert("Неверный пароль!");}
-async function getUser(){if(userCache)return userCache;const d=await db.ref("users/"+user).get();userCache=d.val();return userCache;}
-async function updateUser(d){userCache={...userCache,...d};await db.ref("users/"+user).update(d);}
-function startOnline(){const ref=db.ref("online/"+user);ref.set(true);ref.onDisconnect().remove();db.ref("online").on("value",s=>{onlineCount.innerText=`🟢 Онлайн: ${s.numChildren()}`;});}
-function hslToHex(h,s,l){s/=100;l/=100;const a=s*Math.min(l,1-l);const f=n=>{const k=(n+h/30)%12;const c=l-a*Math.max(Math.min(k-3,9-k,1),-1);return Math.round(255*c).toString(16).padStart(2,'0');};return `#${f(0)}${f(8)}${f(4)}`;}
-function regen(){setInterval(async()=>{const u=(await getUser())||{pixels:0,last:Date.now(),level:1,maxPixels:30};const now=Date.now();const cooldown=30000;const add=Math.floor((now-u.last)/cooldown);if(add>0){u.pixels=Math.min(u.maxPixels||30,u.pixels+add);u.last=now;await updateUser(u);}const eventStr=activeEvent&&Date.now()<activeEvent.endsAt?` | ИВЕНТ`:"";info.innerText=`👤 ${user}${isAdmin?" 👑":""} | ⚡ ${u.pixels}/${u.maxPixels||30}${eventStr}`;},1000);}
+function regen(){setInterval(async()=>{
+  const u=(await getUser())||{pixels:0,last:Date.now(),level:1,maxPixels:30};
+  if(u.banned)return forceBan();
+  const now=Date.now();const cooldown=getCooldown(u.level||1);
+  const add=Math.floor((now-u.last)/cooldown);
+  if(add>0){u.pixels=Math.min(u.maxPixels||30,u.pixels+add);u.last=now;await updateUser(u);}
+  const eventStr=activeEvent&&Date.now()<activeEvent.endsAt?` | ${EVENT_DEFS[activeEvent.type]?.emoji||"🎉"}ИВЕНТ`:"";
+  info.innerText=`👤 ${user}${isAdmin?" 👑":""} | ⚡ ${u.pixels}/${u.maxPixels||30} | 🧱 ${u.totalPlacedPixels||0}${eventStr}`;
+},1000);}
 
 window.onload=async()=>{
+  if(localStorage.getItem("pb_banned")==="true")return alert("🚫 Ты забанен.");
   const u=localStorage.getItem("pb_user");
-  if(u){const d=(await db.ref("users/"+u).get()).val();if(d){user=u;isAdmin=await checkIsAdmin(u);start();}}
+  if(u){
+    const d=(await db.ref("users/"+u).get()).val();
+    if(d){
+      if(d.banned){localStorage.setItem("pb_banned","true");return alert("🚫 Ты забанен.");}
+      user=u;
+      isAdmin = await checkIsAdmin(u); // Проверяем админку в БД при автологине
+      start();
+    }
+  }
 };
 </script>
 </body>
-  </html>
+</html>

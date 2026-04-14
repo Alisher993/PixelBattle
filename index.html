@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pixel Battle REALTIME MULTIPLAYER</title>
+<style>
+body{margin:0;background:#e9e9e9;color:#111;font-family:Arial;display:flex;flex-direction:column;align-items:center}
+#auth{margin-top:20px;display:flex;flex-direction:column;gap:8px;width:220px}
+input,button{padding:10px;border-radius:8px;border:none}
+button{cursor:pointer}
+#game{display:none;flex-direction:column;align-items:center;width:100%}
+#palette{display:flex;flex-wrap:wrap;gap:8px;margin:10px;justify-content:center}
+.color{width:42px;height:42px;border-radius:10px;border:2px solid #444;transition:0.15s;display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer}
+.color.active{border:3px solid white;transform:scale(1.15);box-shadow:0 0 10px white}
+.color.add-color{background:linear-gradient(135deg,#fff,#ddd);color:#444;font-size:24px;font-weight:bold}
+canvas{border:2px solid #999;background:white;touch-action:none}
+#info{margin-top:5px;color:#333}
+#lastPixel{font-size:13px;color:#555;margin:2px 0;min-height:18px;}
+#onlineCount{font-size:13px;color:#555}
+#eventBanner{display:none;width:100%;background:linear-gradient(90deg,#ff6a00,#ee0979);color:#fff;padding:8px 12px;font-size:13px;font-weight:bold;text-align:center;box-sizing:border-box}
+#inspectPanel{position:fixed;bottom:0;left:0;right:0;background:#111;color:#fff;padding:12px;display:none;font-size:14px;box-shadow:0 -2px 10px rgba(0,0,0,0.3)}
+#inspectHeader{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+#closeInspect{background:#333;color:#fff;border:none;border-radius:6px;padding:4px 8px;cursor:pointer}
+#upgradeBtn{margin:4px 8px;padding:8px 14px;border-radius:10px;background:#222;color:#fff;cursor:pointer}
+#upgradeUI{position:fixed;bottom:0;left:0;right:0;background:#111;color:#fff;padding:15px;border-top-left-radius:16px;border-top-right-radius:16px;display:none;z-index:9999}
+#barWrap{height:10px;background:#333;border-radius:8px;overflow:hidden;margin:10px 0}
+#bar{height:100%;width:0%;background:#4caf50}
+#uStats{font-size:13px;color:#bbb;margin-top:6px;line-height:1.4}
+#topUI{position:fixed;bottom:0;left:0;right:0;background:#111;color:#fff;padding:15px;border-top-left-radius:16px;border-top-right-radius:16px;display:none;z-index:9999;max-height:60vh;overflow-y:auto}
+#topList{margin-top:10px;font-size:14px;line-height:2}
+#shopUI{position:fixed;bottom:0;left:0;right:0;background:#111;color:#fff;padding:15px;border-top-left-radius:16px;border-top-right-radius:16px;display:none;z-index:9999;max-height:60vh;overflow-y:auto}
+#eventUI{position:fixed;bottom:0;left:0;right:0;background:#111;color:#fff;padding:15px;border-top-left-radius:16px;border-top-right-radius:16px;display:none;z-index:9999;max-height:80vh;overflow-y:auto}
+#scheduledList{margin-top:10px;font-size:13px}
+.ev-item{background:#222;border-radius:8px;padding:8px 10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+.ev-del{background:#600;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:12px}
+#eventValueWrap{background:#1a1a1a;border-radius:8px;padding:10px;font-size:13px;color:#aaa}
+#coords{position:fixed;bottom:6px;left:6px;background:rgba(0,0,0,0.6);color:#fff;font-size:12px;padding:3px 8px;border-radius:6px;pointer-events:none;display:none;z-index:1000}
+#cooldownBar{width:100%;max-width:400px;height:6px;background:#333;border-radius:3px;overflow:hidden;margin:4px 0}
+#cooldownProgress{height:100%;background:linear-gradient(90deg,#4caf50,#8bc34a);width:0%;transition:width 0.3s ease}
+#cooldownProgress.boosted{background:linear-gradient(90deg,#ff6a00,#ffd700,#ff6a00);animation:boostPulse 1.5s infinite}
+#boostBadge{display:none;background:linear-gradient(135deg,#ff6a00,#ffd700);color:#fff;font-size:12px;font-weight:bold;padding:4px 10px;border-radius:12px;margin:4px 0;box-shadow:0 2px 8px rgba(255,106,0,0.4);animation:boostFloat 2s infinite}
+@keyframes boostPulse{0%,100%{opacity:1;transform:scaleY(1)}50%{opacity:0.8;transform:scaleY(1.2)}}
+@keyframes boostFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+#chatBtn{position:fixed;bottom:6px;right:6px;background:#222;color:#fff;border:none;border-radius:50%;width:48px;height:48px;font-size:22px;cursor:pointer;z-index:1000;box-shadow:0 2px 8px rgba(0,0,0,0.4)}
+#chatUI{position:fixed;bottom:0;right:0;width:320px;max-width:100vw;height:420px;background:#111;color:#fff;border-top-left-radius:16px;display:none;flex-direction:column;z-index:9998;box-shadow:-2px 0 20px rgba(0,0,0,0.5)}
+#chatHeader{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid #333;font-weight:bold}
+#chatMessages{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:6px}
+#chatMessages::-webkit-scrollbar{width:4px}
+#chatMessages::-webkit-scrollbar-thumb{background:#444;border-radius:2px}
+.chat-msg{font-size:13px;line-height:1.4;word-break:break-word}
+.chat-msg .chat-user{font-weight:bold;margin-right:4px}
+.chat-msg.admin-msg .chat-user{color:#ffaa00}
+#chatInputWrap{display:flex;gap:6px;padding:10px;border-top:1px solid #333}
+#chatInput{flex:1;background:#222;color:#fff;border:none;border-radius:8px;padding:8px;font-size:13px}
+#chatSend{background:#444;color:#fff;border:none;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13px}
+#chatNotif{position:absolute;top:-4px;right:-4px;background:#ee0979;color:#fff;border-radius:50%;width:18px;height:18px;font-size:11px;display:none;align-items:center;justify-content:center;font-weight:bold}
+
+#nukeFlash{display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:999999;pointer-events:none}
+#nightOverlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:9998;background:rgba(0,0,20,0.7);pointer-events:none;transition:opacity 1s}
+@keyframes psychoPulse{0%{filter:hue-rotate(0deg)}100%{filter:hue-rotate(360deg)}}
+#nightOverlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:998;pointer-events:none;background:rgba(0,0,30,0.82);transition:opacity 2s}
+@keyframes nightIn{from{opacity:0}to{opacity:1}}
+@keyframes countdownPulse{0%{background:#cc0000;transform:scale(1)}50%{background:#ff0000;transform:scale(1.02)}100%{background:#cc0000;transform:scale(1)}}
+@keyframes nukeAnim{0%{background:rgba(255,0,0,0.9)}15%{background:rgba(255,255,255,0.95)}35%{background:rgba(255,30,0,0.75)}55%{background:rgba(220,0,0,0.55)}75%{background:rgba(255,0,0,0.3)}100%{background:rgba(255,0,0,0)}}
+
+/* Модальное окно выбора цвета */
+#colorPickerModal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:10000;align-items:center;justify-content:center}
+#colorPickerContent{background:#222;padding:20px;border-radius:16px;max-width:300px;width:90%}
+#colorPickerContent h3{color:#fff;margin:0 0 15px 0;text-align:center}
+#colorPickerInput{width:100%;height:60px;border:none;border-radius:8px;cursor:pointer}
+#colorPickerButtons{display:flex;gap:10px;margin-top:15px}
+#colorPickerButtons button{flex:1;padding:10px;border-radius:8px;border:none;cursor:pointer;font-size:14px}
+</style>
+</head>
+<body>
+
+<h2>🔥 Pixel Battle REALTIME</h2>
+
+<div id="auth">
+  <input id="loginInput" placeholder="логин">
+  <input id="passInput" placeholder="пароль" type="password">
+  <button onclick="register()">Регистрация</button>
+  <button onclick="login()">Вход</button>
+</div>
+
+<div id="game">
+  <div id="eventBanner"></div>
+  <div id="info"></div>
+  <div id="boostBadge">🚀 БУСТ НОВИЧКА: <span id="boostTimer"></span></div>
+  <div id="cooldownBar"><div id="cooldownProgress"></div></div>
+  <div id="lastPixel"></div>
+  <div style="display:flex;gap:8px;align-items:center;margin:2px 0;flex-wrap:wrap;justify-content:center">
+    <div id="onlineCount"></div>
+    <button onclick="openTop()" style="padding:6px 12px;border-radius:8px;background:#222;color:#fff;font-size:13px;border:none">🏆 Топ</button>
+    <button onclick="openShop()" style="padding:6px 12px;border-radius:8px;background:#222;color:#fff;font-size:13px;border:none">🛒 Магазин</button>
+  </div>
+  <button id="upgradeBtn" onclick="openUpgradeUI()">⬆ Прокачка</button>
+  <div id="palette"></div>
+  <canvas id="c"></canvas>
+</div>
+
+<div id="inspectPanel">
+  <div id="inspectHeader">
+    <div>🔍 Инспектор</div>
+    <button id="closeInspect">✖</button>
+  </div>
+  <div id="inspectContent"></div>
+</div>
+
+<div id="upgradeUI">
+  <div style="display:flex;justify-content:space-between">
+    <b id="uName"></b>
+    <button onclick="closeUpgradeUI()">✖</button>
+  </div>
+  <div id="uLevel"></div>
+  <div id="barWrap"><div id="bar"></div></div>
+  <div id="uStats"></div>
+</div>
+
+<div id="topUI">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <b>🏆 Топ игроков</b>
+    <button onclick="closeTop()">✖</button>
+  </div>
+  <div id="topList">Загрузка...</div>
+</div>
+
+<div id="shopUI">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <b>🛒 Магазин</b>
+    <button onclick="closeShop()">✖</button>
+  </div>
+  <div style="margin-top:20px;text-align:center;color:#999;font-size:14px">
+    <p>🚧 В разработке...</p>
+    <p style="font-size:12px;margin-top:10px">Скоро здесь появятся крутые предметы!</p>
+  </div>
+</div>
+
+<div id="eventUI">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <b>🎉 Планировщик ивентов</b>
+    <button onclick="closeEventUI()">✖</button>
+  </div>
+  <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+    <select id="eventType" onchange="updateEventValueUI()" style="padding:8px;border-radius:8px;background:#222;color:#fff;border:none;font-size:14px">
+      <option value="gold">🏅 Золотой пиксель</option>
+      <option value="fastcharge">⚡ Быстрая зарядка</option>
+      <option value="free">🆓 Халява</option>
+      <option value="rain">🎁 Дождь энергии</option>
+      <option value="countdown">☢️ Обратный отсчёт до ядерной бомбы</option>
+      <option value="shuffle">🔀 Перемешка</option>
+      <option value="psycho">🌈 Психоз</option>
+      <option value="roulette">🎲 Рулетка</option>
+      <option value="target">🎯 Цель</option>
+      <option value="night">🌙 Ночь</option>
+      <option value="doubleexp">2️⃣ Двойной опыт</option>
+      <option value="shuffle">🔀 Перемешка (50 пикселей меняются местами)</option>
+      <option value="psycho">🌈 Психоз (все пиксели радужные)</option>
+      <option value="roulette">🎲 Рулетка (случайная энергия всем)</option>
+      <option value="target">🎯 Цель (заполни зону первым)</option>
+      <option value="night">🌙 Ночь (темнота на 2 минуты)</option>
+      <option value="doublexp">2️⃣ Двойной опыт (5 минут)</option>
+    </select>
+
+    <!-- Динамическое поле настройки -->
+    <div id="eventValueWrap">
+      <div id="eventValueLabel" style="margin-bottom:6px"></div>
+      <input id="eventValue" type="number" min="1" style="padding:8px;border-radius:8px;background:#333;color:#fff;border:none;font-size:14px;width:100%;box-sizing:border-box">
+    </div>
+
+    <input id="eventTime" type="datetime-local" style="padding:8px;border-radius:8px;background:#222;color:#fff;border:none;font-size:14px">
+    <button onclick="scheduleEvent()" style="padding:10px;border-radius:8px;background:#ff6a00;color:#fff;border:none;font-size:14px;cursor:pointer">➕ Запланировать</button>
+  </div>
+  <div style="margin-top:4px;font-size:12px;color:#aaa">Или запустить прямо сейчас:</div>
+  <button onclick="launchEventNow()" style="padding:8px;border-radius:8px;background:#333;color:#fff;border:none;font-size:13px;cursor:pointer;margin-top:4px;width:100%">▶ Запустить выбранный ивент сейчас</button>
+  <div style="margin-top:12px;font-size:13px;color:#aaa">Запланированные:</div>
+  <div id="scheduledList">Пусто</div>
+</div>
+
+<!-- Модальное окно выбора цвета -->
+<div id="colorPickerModal">
+  <div id="colorPickerContent">
+    <h3>🎨 Выбор цвета</h3>
+    <input type="color" id="colorPickerInput" value="#ff0000">
+    <div id="colorPickerButtons">
+      <button onclick="cancelColorPicker()" style="background:#555;color:#fff">Отмена</button>
+      <button onclick="confirmColorPicker()" style="background:#4caf50;color:#fff">ОК</button>
+    </div>
+  </div>
+</div>
+
+<div id="nukeFlash"></div>
+<div id="nightOverlay"></div>
+
+<script type="module">
+import{initializeApp}from"https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import{getDatabase as gdb,ref,set,get,update,onValue,push,remove,child}from"https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+const firebaseConfig={apiKey:"AIzaSyD3e_cbQj3jKeyR2gZHy2_kIvxKf6fIbzM",authDomain:"pixelbattle-5e5f3.firebaseapp.com",databaseURL:"https://pixelbattle-5e5f3-default-rtdb.europe-west1.firebasedatabase.app",projectId:"pixelbattle-5e5f3",storageBucket:"pixelbattle-5e5f3.firebasestorage.app",messagingSenderId:"1040149776610",appId:"1:1040149776610:web:f36fb1abf0e1afeac49f81"};
+const app=initializeApp(firebaseConfig);window.db=gdb(app);
+
+const W=48,H=48,SIZE=10;
+let user,isAdmin,grid=[],selected="#ff0000",canvas,ctx,palette,info,auth,game,lastPixel;
+let activeEvent=null;
+let newbieBoostEndsAt = null;
+let customColors = []; // Кастомные цвета пользователя
+
+const colors=["#ff0000","#00ff00","#0000ff","#ffff00","#ff00ff","#00ffff","#ffffff","#000000","#ff8800","#8800ff"];
+
+window.buildPalette=buildPalette;
+window.register=register;
+window.login=login;
+window.openUpgradeUI=openUpgradeUI;
+window.closeUpgradeUI=closeUpgradeUI;
+window.openTop=openTop;
+window.closeTop=closeTop;
+window.openShop=openShop;
+window.closeShop=closeShop;
+window.openEventUI=openEventUI;
+window.closeEventUI=closeEventUI;
+window.scheduleEvent=scheduleEvent;
+window.deleteScheduledEvent=deleteScheduledEvent;
+window.launchEventNow=launchEventNow;
+window.updateEventValueUI=updateEventValueUI;
+window.openColorPicker=openColorPicker;
+window.cancelColorPicker=cancelColorPicker;
+window.confirmColorPicker=confirmColorPicker;
+
+function buildPalette(){
+  palette=document.getElementById("palette");
+  palette.innerHTML="";
+  
+  // Базовые цвета
+  colors.forEach(c=>{
+    const d=document.createElement("div");
+    d.className="color";
+    d.style.background=c;
+    if(c===selected)d.classList.add("active");
+    d.onclick=()=>{selected=c;buildPalette();};
+    palette.appendChild(d);
+  });
+  
+  // Кастомные цвета пользователя
+  customColors.forEach(c=>{
+    const d=document.createElement("div");
+    d.className="color";
+    d.style.background=c;
+    if(c===selected)d.classList.add("active");
+    d.onclick=()=>{selected=c;buildPalette();};
+    palette.appendChild(d);
+  });
+  
+  // Кнопка добавления цвета
+  const add=document.createElement("div");
+  add.className="color add-color";
+  add.innerText="+";
+  add.onclick=openColorPicker;
+  palette.appendChild(add);
+}
+
+function openColorPicker(){
+  document.getElementById("colorPickerModal").style.display="flex";
+}
+
+function cancelColorPicker(){
+  document.getElementById("colorPickerModal").style.display="none";
+}
+
+function confirmColorPicker(){
+  const newColor = document.getElementById("colorPickerInput").value;
+  if(!customColors.includes(newColor)){
+    customColors.push(newColor);
+    selected = newColor;
+    buildPalette();
+  }
+  document.getElementById("colorPickerModal").style.display="none";
+}
+
+async function register(){
+  const l=loginInput.value.trim().toLowerCase(),p=passInput.value.trim();
+  if(!l||!p)return alert("❌ Заполни поля!");
+  const d=(await db.ref("users/"+l).get()).val();
+  if(d)return alert("⚠️ Пользователь существует!");
+  // Буст новичка: 5 минут (300000 мс)
+  const boostDuration = 5 * 60 * 1000;
+  const boostEndsAt = Date.now() + boostDuration;
+  await db.ref("users/"+l).set({pass:p,pixels:30,last:Date.now(),totalPlacedPixels:0,level:1,maxPixels:30,nextLevelProgress:0,banned:false,pixates:0,newbieBoostEndsAt:boostEndsAt});
+  alert("✅ Зарегистрирован!");
+}
+
+async function login(){
+  const l=loginInput.value.trim().toLowerCase(),p=passInput.value.trim();
+  if(!l||!p)return alert("❌ Заполни поля!");
+  const d=(await db.ref("users/"+l).get()).val();
+  if(!d||d.pass!==p)return alert("❌ Неверный логин или пароль!");
+  if(d.banned){localStorage.setItem("pb_banned","true");return alert("🚫 Ты забанен.");}
+  user=l;
+  isAdmin=await checkIsAdmin(l);
+  localStorage.setItem("pb_user",l);
+  
+  // Устанавливаем буст новичка если он активен
+  newbieBoostEndsAt = d.newbieBoostEndsAt || null;
+  
+  let lvl=d.level||1;let placed=d.totalPlacedPixels||0;let maxPixels=d.maxPixels||30;
+  while(placed>=getRequired(lvl)){placed-=getRequired(lvl);lvl++;maxPixels+=5;}
+  await db.ref("users/"+l).update({level:lvl,totalPlacedPixels:placed,maxPixels,nextLevelProgress:placed});
+  start();
+}
+
+async function start(){
+  auth.style.display="none";game.style.display="flex";
+  buildPalette();startOnline();regen();
+}
+
+function regen(){setInterval(async()=>{
+  const u=(await getUser())||{pixels:0,last:Date.now(),level:1,maxPixels:30,pixates:0};
+  if(u.banned)return forceBan();
+  
+  // Обновляем глобальную переменную буста
+  newbieBoostEndsAt = u.newbieBoostEndsAt || null;
+  
+  const now=Date.now();const cooldown=getCooldown(u.level||1);
+  const add=Math.floor((now-u.last)/cooldown);
+  if(add>0){u.pixels=Math.min(u.maxPixels||30,u.pixels+add);u.last=now;await updateUser(u);}
+  const eventStr=activeEvent&&Date.now()<activeEvent.endsAt?` | ${EVENT_DEFS[activeEvent.type]?.emoji||"🎉"}ИВЕНТ`:"";
+  info.innerText=`👤 ${user}${isAdmin?" 👑":""} | ⚡ ${u.pixels}/${u.maxPixels||30} | 🧱 ${u.totalPlacedPixels||0} | 💎 ${u.pixates||0}${eventStr}`;
+  
+  // Обновление визуализации буста новичка
+  const boostBadge = document.getElementById("boostBadge");
+  const boostTimer = document.getElementById("boostTimer");
+  const cooldownProgress = document.getElementById("cooldownProgress");
+  
+  if(newbieBoostEndsAt && now < newbieBoostEndsAt){
+    const timeLeft = Math.ceil((newbieBoostEndsAt - now) / 1000);
+    const minutes = Math.floor(timeLeft / 60);
+    const seconds = timeLeft % 60;
+    boostTimer.innerText = `${minutes}:${seconds.toString().padStart(2,'0')}`;
+    boostBadge.style.display = "block";
+    cooldownProgress.classList.add("boosted");
+  } else {
+    boostBadge.style.display = "none";
+    cooldownProgress.classList.remove("boosted");
+    // Если буст закончился, удаляем его из базы данных
+    if(newbieBoostEndsAt && now >= newbieBoostEndsAt){
+      newbieBoostEndsAt = null;
+      await db.ref("users/"+user+"/newbieBoostEndsAt").remove();
+    }
+  }
+  
+  // Обновление прогресс бара кулдауна
+  const timeSinceLast = now - u.last;
+  const progress = Math.min(100, (timeSinceLast / cooldown) * 100);
+  cooldownProgress.style.width = progress + "%";
+},1000);}
+
+
+// ===== ЧАТ =====
+let chatOpen = false;
+let unreadCount = 0;
+let lastChatTime = 0;
+
+function toggleChat(){
+  chatOpen = !chatOpen;
+  document.getElementById("chatUI").style.display = chatOpen ? "flex" : "none";
+  if(chatOpen){
+    unreadCount = 0;
+    updateChatNotif();
+    setTimeout(()=>{
+      const msgs = document.getElementById("chatMessages");
+      msgs.scrollTop = msgs.scrollHeight;
+    }, 50);
+  }
+}
+
+function updateChatNotif(){
+  const el = document.getElementById("chatNotif");
+  if(unreadCount > 0){
+    el.style.display = "flex";
+    el.innerText = unreadCount > 9 ? "9+" : unreadCount;
+  } else {
+    el.style.display = "none";
+  }
+}
+
+function sendChat(){
+  if(!user) return;
+  const input = document.getElementById("chatInput");
+  const msg = input.value.trim();
+  if(!msg) return;
+  const now = Date.now();
+  if(now - lastChatTime < 2000) return; // антиспам 2 сек
+  lastChatTime = now;
+  input.value = "";
+  db.ref("chat").push({user, msg, t: now, admin: isAdmin});
+}
+
+db.ref("chat").limitToLast(50).on("child_added", s => {
+  const d = s.val();
+  if(!d) return;
+  const msgs = document.getElementById("chatMessages");
+  const div = document.createElement("div");
+  div.className = "chat-msg" + (d.admin ? " admin-msg" : "");
+  const timeStr = new Date(d.t).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+  div.innerHTML = `<span style="color:#666;font-size:11px">${timeStr}</span> <span class="chat-user" style="color:${d.admin?"#ffaa00":"#4caf50"}">${d.user}${d.admin?" 👑":""}</span>${escapeHtml(d.msg)}`;
+  msgs.appendChild(div);
+  // ограничиваем до 100 сообщений в DOM
+  while(msgs.children.length > 100) msgs.removeChild(msgs.firstChild);
+  if(chatOpen){
+    msgs.scrollTop = msgs.scrollHeight;
+  } else if(d.user !== user){
+    unreadCount++;
+    updateChatNotif();
+  }
+});
+
+function escapeHtml(s){
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+// ===== КОНЕЦ ЧАТА =====
+
+window.toggleChat=toggleChat;
+window.sendChat=sendChat;
+
+window.onload=async()=>{
+  if(localStorage.getItem("pb_banned")==="true")return alert("🚫 Ты забанен.");
+  const u=localStorage.getItem("pb_user");
+  if(u){
+    const d=(await db.ref("users/"+u).get()).val();
+    if(d){
+      if(d.banned){localStorage.setItem("pb_banned","true");return alert("🚫 Ты забанен.");}
+      user=u;
+      isAdmin=await checkIsAdmin(u);
+      newbieBoostEndsAt = d.newbieBoostEndsAt || null;
+      start();
+    }
+  }
+};
+
+// ===== МАГАЗИН =====
+function openShop(){
+  document.getElementById("shopUI").style.display="block";
+}
+
+function closeShop(){
+  document.getElementById("shopUI").style.display="none";
+}
+
+// ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+async function getUser(){return(await db.ref("users/"+user).get()).val();}
+async function updateUser(u){await db.ref("users/"+user).update(u);}
+function getRequired(lvl){return Math.floor(50*Math.pow(1.5,lvl-1));}
+function getCooldown(lvl){
+  const base = 3000;
+  const reduction = Math.min(2000, (lvl - 1) * 100);
+  const baseCooldown = base - reduction;
+  // Буст новичка: кулдаун в 2 раза быстрее
+  if(newbieBoostEndsAt && Date.now() < newbieBoostEndsAt){
+    return baseCooldown / 2;
+  }
+  return baseCooldown;
+}
+
+async function checkIsAdmin(username){
+  const admins=(await db.ref("admins").get()).val()||{};
+  return admins[username]===true;
+}
+
+function forceBan(){
+  localStorage.setItem("pb_banned","true");
+  alert("🚫 Ты забанен.");
+  location.reload();
+}
+
+function openUpgradeUI(){
+  document.getElementById("upgradeUI").style.display="block";
+  updateUpgradeUI();
+}
+
+function closeUpgradeUI(){
+  document.getElementById("upgradeUI").style.display="none";
+}
+
+async function updateUpgradeUI(){
+  const u=await getUser();
+  if(!u)return;
+  const lvl=u.level||1;
+  const placed=u.totalPlacedPixels||0;
+  const req=getRequired(lvl);
+  document.getElementById("uName").innerText=user;
+  document.getElementById("uLevel").innerText=`Уровень: ${lvl}`;
+  document.getElementById("bar").style.width=(placed/req*100)+"%";
+  const cd=getCooldown(lvl);
+  document.getElementById("uStats").innerHTML=`⚡ Энергия: ${u.pixels}/${u.maxPixels||30}<br>🧱 Поставлено: ${placed}/${req}<br>⏱ Кулдаун: ${(cd/1000).toFixed(1)}с<br>💎 Pixates: ${u.pixates||0}`;
+}
+
+function openTop(){
+  document.getElementById("topUI").style.display="block";
+  loadTop();
+}
+
+function closeTop(){
+  document.getElementById("topUI").style.display="none";
+}
+
+async function loadTop(){
+  const users=(await db.ref("users").get()).val()||{};
+  const arr=Object.keys(users).map(k=>({name:k,placed:users[k].totalPlacedPixels||0,level:users[k].level||1}));
+  arr.sort((a,b)=>b.placed-a.placed);
+  const top10=arr.slice(0,10);
+  const html=top10.map((u,i)=>`${i+1}. ${u.name} — LVL${u.level} — ${u.placed} 🧱`).join("<br>");
+  document.getElementById("topList").innerHTML=html||"Пусто";
+}
+
+function openEventUI(){
+  document.getElementById("eventUI").style.display="block";
+  updateEventValueUI();
+  loadScheduledEvents();
+}
+
+function closeEventUI(){
+  document.getElementById("eventUI").style.display="none";
+}
+
+const EVENT_DEFS={
+  gold:{emoji:"🏅",label:"Золотой пиксель",valueLabel:"Координата X (0-47)",hasValue:true},
+  fastcharge:{emoji:"⚡",label:"Быстрая зарядка",valueLabel:"Длительность (секунды)",hasValue:true},
+  free:{emoji:"🆓",label:"Халява",valueLabel:"",hasValue:false},
+  rain:{emoji:"🎁",label:"Дождь энергии",valueLabel:"Количество энергии",hasValue:true},
+  countdown:{emoji:"☢️",label:"Обратный отсчёт до ядерной бомбы",valueLabel:"Секунды до взрыва",hasValue:true},
+  shuffle:{emoji:"🔀",label:"Перемешка",valueLabel:"",hasValue:false},
+  psycho:{emoji:"🌈",label:"Психоз",valueLabel:"Длительность (секунды)",hasValue:true},
+  roulette:{emoji:"🎲",label:"Рулетка",valueLabel:"",hasValue:false},
+  target:{emoji:"🎯",label:"Цель",valueLabel:"Координата X цели",hasValue:true},
+  night:{emoji:"🌙",label:"Ночь",valueLabel:"Длительность (секунды)",hasValue:true},
+  doubleexp:{emoji:"2️⃣",label:"Двойной опыт",valueLabel:"Длительность (секунды)",hasValue:true}
+};
+
+function updateEventValueUI(){
+  const type=document.getElementById("eventType").value;
+  const def=EVENT_DEFS[type];
+  const wrap=document.getElementById("eventValueWrap");
+  const label=document.getElementById("eventValueLabel");
+  const input=document.getElementById("eventValue");
+  if(def&&def.hasValue){
+    wrap.style.display="block";
+    label.innerText=def.valueLabel;
+    input.value=type==="gold"?24:type==="countdown"?10:60;
+  }else{
+    wrap.style.display="none";
+  }
+}
+
+async function scheduleEvent(){
+  if(!isAdmin)return alert("❌ Только для админов!");
+  const type=document.getElementById("eventType").value;
+  const time=document.getElementById("eventTime").value;
+  if(!time)return alert("❌ Укажи время!");
+  const def=EVENT_DEFS[type];
+  const value=def&&def.hasValue?parseInt(document.getElementById("eventValue").value):null;
+  const timestamp=new Date(time).getTime();
+  await db.ref("scheduledEvents").push({type,timestamp,value});
+  alert("✅ Ивент запланирован!");
+  loadScheduledEvents();
+}
+
+async function loadScheduledEvents(){
+  const events=(await db.ref("scheduledEvents").get()).val()||{};
+  const arr=Object.keys(events).map(k=>({id:k,...events[k]}));
+  arr.sort((a,b)=>a.timestamp-b.timestamp);
+  const html=arr.map(e=>{
+    const def=EVENT_DEFS[e.type];
+    const timeStr=new Date(e.timestamp).toLocaleString();
+    const valueStr=e.value?` (${e.value})`:"";
+    return`<div class="ev-item"><div>${def.emoji} ${def.label}${valueStr}<br><span style="font-size:11px;color:#777">${timeStr}</span></div><button class="ev-del" onclick="deleteScheduledEvent('${e.id}')">Удалить</button></div>`;
+  }).join("");
+  document.getElementById("scheduledList").innerHTML=html||"Пусто";
+}
+
+async function deleteScheduledEvent(id){
+  if(!isAdmin)return;
+  await db.ref("scheduledEvents/"+id).remove();
+  loadScheduledEvents();
+}
+
+async function launchEventNow(){
+  if(!isAdmin)return alert("❌ Только для админов!");
+  const type=document.getElementById("eventType").value;
+  const def=EVENT_DEFS[type];
+  const value=def&&def.hasValue?parseInt(document.getElementById("eventValue").value):null;
+  await db.ref("activeEvent").set({type,value,endsAt:Date.now()+300000});
+  alert("✅ Ивент запущен!");
+}
+
+db.ref("scheduledEvents").on("value",async s=>{
+  const events=s.val()||{};
+  const now=Date.now();
+  for(const id in events){
+    const e=events[id];
+    if(e.timestamp<=now){
+      await db.ref("activeEvent").set({type:e.type,value:e.value,endsAt:now+300000});
+      await db.ref("scheduledEvents/"+id).remove();
+    }
+  }
+});
+
+db.ref("activeEvent").on("value",s=>{
+  const e=s.val();
+  if(!e||Date.now()>e.endsAt){
+    activeEvent=null;
+    document.getElementById("eventBanner").style.display="none";
+    document.getElementById("nightOverlay").style.display="none";
+    if(canvas)canvas.style.animation="";
+    return;
+  }
+  activeEvent=e;
+  const def=EVENT_DEFS[e.type];
+  const valueStr=e.value?` (${e.value})`:"";
+  document.getElementById("eventBanner").innerText=`${def.emoji} ${def.label.toUpperCase()}${valueStr}`;
+  document.getElementById("eventBanner").style.display="block";
+  if(e.type==="psycho"&&canvas){
+    canvas.style.animation="psychoPulse 3s infinite";
+  }
+  if(e.type==="night"){
+    const overlay=document.getElementById("nightOverlay");
+    overlay.style.display="block";
+    overlay.style.animation="nightIn 2s";
+  }
+});
+
+function startOnline(){
+  const conn=db.ref(".info/connected");
+  conn.on("value",s=>{
+    if(s.val()===true){
+      const me=db.ref("online/"+user);
+      me.onDisconnect().remove();
+      me.set(true);
+    }
+  });
+  db.ref("online").on("value",s=>{
+    const count=s.val()?Object.keys(s.val()).length:0;
+    document.getElementById("onlineCount").innerText=`👥 Онлайн: ${count}`;
+  });
+}
+
+canvas=document.getElementById("c");
+ctx=canvas.getContext("2d");
+canvas.width=W*SIZE;
+canvas.height=H*SIZE;
+palette=document.getElementById("palette");
+info=document.getElementById("info");
+auth=document.getElementById("auth");
+game=document.getElementById("game");
+lastPixel=document.getElementById("lastPixel");
+
+for(let y=0;y<H;y++){grid[y]=[];for(let x=0;x<W;x++)grid[y][x]="#ffffff";}
+
+db.ref("grid").on("value",s=>{
+  const data=s.val();
+  if(data){
+    for(let y=0;y<H;y++){
+      for(let x=0;x<W;x++){
+        grid[y][x]=data[y]&&data[y][x]?data[y][x]:"#ffffff";
+      }
+    }
+  }
+  draw();
+});
+
+function draw(){
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      ctx.fillStyle=grid[y][x];
+      ctx.fillRect(x*SIZE,y*SIZE,SIZE,SIZE);
+    }
+  }
+}
+
+let isDown=false,coordsDiv=document.getElementById("coords");
+
+canvas.onmousedown=canvas.ontouchstart=e=>{e.preventDefault();isDown=true;place(e);};
+canvas.onmousemove=canvas.ontouchmove=e=>{
+  e.preventDefault();
+  const r=canvas.getBoundingClientRect();
+  const cx=e.touches?e.touches[0].clientX:e.clientX;
+  const cy=e.touches?e.touches[0].clientY:e.clientY;
+  const x=Math.floor((cx-r.left)/SIZE);
+  const y=Math.floor((cy-r.top)/SIZE);
+  if(x>=0&&x<W&&y>=0&&y<H){
+    coordsDiv.innerText=`(${x},${y})`;
+    coordsDiv.style.display="block";
+  }else{
+    coordsDiv.style.display="none";
+  }
+  if(isDown)place(e);
+};
+canvas.onmouseup=canvas.ontouchend=()=>{isDown=false;};
+canvas.onmouseleave=()=>{coordsDiv.style.display="none";};
+
+let canClick=true;
+async function place(e){
+  if(!user||!canClick)return;
+  canClick=false;
+  setTimeout(()=>canClick=true,200);
+  const r=canvas.getBoundingClientRect();
+  const cx=e.touches?e.touches[0].clientX:e.clientX;
+  const cy=e.touches?e.touches[0].clientY:e.clientY;
+  const x=Math.floor((cx-r.left)/SIZE);
+  const y=Math.floor((cy-r.top)/SIZE);
+  if(x<0||x>=W||y<0||y>=H)return;
+  const u=await getUser();
+  if(!u)return;
+  if(u.banned)return forceBan();
+  if(u.pixels<1)return;
+  
+  let expGain=1;
+  let goldBonus=0;
+  
+  if(activeEvent){
+    if(activeEvent.type==="gold"&&x===activeEvent.value){
+      expGain=10;
+      goldBonus=50;
+    }
+    if(activeEvent.type==="free"){
+      u.pixels++;
+    }
+    if(activeEvent.type==="doubleexp"){
+      expGain*=2;
+    }
+  }
+  
+  u.pixels--;
+  u.totalPlacedPixels=(u.totalPlacedPixels||0)+expGain;
+  u.pixates=(u.pixates||0)+1; // Увеличиваем Pixates на 1
+  if(goldBonus>0){
+    u.pixels=Math.min(u.maxPixels||30,u.pixels+goldBonus);
+  }
+  let lvl=u.level||1;
+  let maxPixels=u.maxPixels||30;
+  while(u.totalPlacedPixels>=getRequired(lvl)){
+    u.totalPlacedPixels-=getRequired(lvl);
+    lvl++;
+    maxPixels+=5;
+  }
+  u.level=lvl;
+  u.maxPixels=maxPixels;
+  u.nextLevelProgress=u.totalPlacedPixels;
+  u.last=Date.now();
+  await updateUser(u);
+  grid[y][x]=selected;
+  await db.ref("grid/"+y+"/"+x).set(selected);
+  await db.ref("lastPixelPlaced").set({user,x,y,color:selected,time:Date.now()});
+  draw();
+  
+  let msg=`${user} → (${x},${y})`;
+  if(goldBonus>0)msg+=` 🏅+${goldBonus}⚡`;
+  lastPixel.innerText=msg;
+}
+
+db.ref("lastPixelPlaced").on("value",s=>{
+  const d=s.val();
+  if(d){
+    const msg=`${d.user} → (${d.x},${d.y})`;
+    lastPixel.innerText=msg;
+  }
+});
+
+const inspectPanel=document.getElementById("inspectPanel");
+const inspectContent=document.getElementById("inspectContent");
+const closeInspect=document.getElementById("closeInspect");
+
+canvas.oncontextmenu=e=>{
+  e.preventDefault();
+  const r=canvas.getBoundingClientRect();
+  const x=Math.floor((e.clientX-r.left)/SIZE);
+  const y=Math.floor((e.clientY-r.top)/SIZE);
+  if(x<0||x>=W||y<0||y>=H)return;
+  db.ref("grid/"+y+"/"+x).get().then(s=>{
+    const color=s.val()||"#ffffff";
+    inspectContent.innerHTML=`<b>Координаты:</b> (${x}, ${y})<br><b>Цвет:</b> <span style="display:inline-block;width:20px;height:20px;background:${color};border:1px solid #fff;vertical-align:middle"></span> ${color}`;
+    inspectPanel.style.display="block";
+  });
+};
+
+closeInspect.onclick=()=>{inspectPanel.style.display="none";};
+</script>
+
+<div id="coords"></div>
+<button id="chatBtn" onclick="toggleChat()">💬<div id="chatNotif"></div></button>
+<div id="chatUI">
+  <div id="chatHeader">
+    💬 Чат
+    <button onclick="toggleChat()" style="background:#333;color:#fff;border:none;border-radius:6px;padding:4px 8px;cursor:pointer">✖</button>
+  </div>
+  <div id="chatMessages"></div>
+  <div id="chatInputWrap">
+    <input id="chatInput" placeholder="Сообщение..." maxlength="120" onkeydown="if(event.key==='Enter')sendChat()">
+    <button id="chatSend" onclick="sendChat()">➤</button>
+  </div>
+</div>
+</body>
+</html>
